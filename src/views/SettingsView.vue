@@ -148,51 +148,61 @@ async function saveCurrency() {
 
 <template>
   <div class="page settings">
-    <section>
-      <h3>本月预算（{{ month }}）</h3>
+    <h2>我的</h2>
+
+    <section class="card">
+      <h3>本月预算 <span class="sub">{{ month }}</span></h3>
       <div class="row">
-        <input v-model="budgetYuan" type="number" placeholder="预算金额(元)" />
-        <button @click="saveBudget">保存</button>
+        <input v-model="budgetYuan" type="number" placeholder="预算金额 (元)" />
+        <button class="primary" @click="saveBudget">保存</button>
       </div>
-      <p v-if="usage && usage.budget != null" :class="{ over: usage.overBudget }">
-        已花 {{ centsToYuan(usage.spent) }} / {{ centsToYuan(usage.budget) }}
-        <span v-if="usage.overBudget">⚠️ 已超支</span>
-        <span v-else>，剩 {{ centsToYuan(usage.remaining) }}</span>
-      </p>
+      <div v-if="usage && usage.budget != null" class="budget">
+        <div class="bar">
+          <span
+            class="fill" :class="{ over: usage.overBudget }"
+            :style="{ width: Math.min(100, (usage.spent / usage.budget) * 100) + '%' }"
+          ></span>
+        </div>
+        <p :class="{ over: usage.overBudget }">
+          已花 {{ centsToYuan(usage.spent) }} / {{ centsToYuan(usage.budget) }}
+          <span v-if="usage.overBudget">· ⚠️ 已超支</span>
+          <span v-else>· 剩 {{ centsToYuan(usage.remaining) }}</span>
+        </p>
+      </div>
     </section>
 
-    <section>
+    <section class="card">
       <h3>货币符号</h3>
       <div class="row">
         <input v-model="currency" maxlength="3" />
-        <button @click="saveCurrency">保存</button>
+        <button class="primary" @click="saveCurrency">保存</button>
       </div>
     </section>
 
-    <section>
-      <h3>换机迁移（二维码）</h3>
-      <p class="hint">旧机点"显示二维码"，新机点"扫码导入"，多帧请持续对准轮播。</p>
+    <section class="card">
+      <h3>换机迁移 <span class="sub">二维码</span></h3>
+      <p class="hint">旧机点「显示二维码」，新机点「扫码导入」，多帧请持续对准轮播。</p>
       <div class="row">
-        <button @click="startQrExport">显示二维码</button>
-        <button @click="startScan">扫码导入</button>
+        <button class="ghost" @click="startQrExport">显示二维码</button>
+        <button class="ghost" @click="startScan">扫码导入</button>
       </div>
       <div v-if="qrImg" class="qr-box">
         <img :src="qrImg" />
         <p>第 {{ qrIndex + 1 }} / {{ qrFrames.length }} 帧</p>
-        <button @click="stopQrExport">关闭</button>
+        <button class="ghost" @click="stopQrExport">关闭</button>
       </div>
       <div v-if="scanning" class="scan-box">
         <video ref="videoEl" playsinline></video>
         <p>{{ scanStatus }}</p>
-        <button @click="stopScan">取消</button>
+        <button class="ghost" @click="stopScan">取消</button>
       </div>
     </section>
 
-    <section>
-      <h3>文件备份（兜底）</h3>
+    <section class="card">
+      <h3>文件备份 <span class="sub">兜底</span></h3>
       <div class="row">
-        <button @click="exportFile">导出备份文件</button>
-        <label class="file-btn">
+        <button class="ghost" @click="exportFile">导出备份文件</button>
+        <label class="ghost file-btn">
           导入备份文件
           <input type="file" accept=".txt" @change="importFile" hidden />
         </label>
@@ -202,16 +212,47 @@ async function saveCurrency() {
 </template>
 
 <style scoped>
-section { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
-section h3 { font-size: 15px; margin-bottom: 10px; }
-.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.row input { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 8px; }
-.row button, .file-btn {
-  padding: 8px 14px; border: none; background: #007aff; color: #fff; border-radius: 8px; cursor: pointer;
+.settings h2 { margin-bottom: 16px; }
+section { padding: 18px; margin-bottom: 14px; }
+section h3 {
+  font-size: 15px; font-weight: 700; margin-bottom: 12px;
+  display: flex; align-items: baseline; gap: 8px;
 }
-.hint { color: #999; font-size: 12px; margin-bottom: 8px; }
-.over { color: #ff3b30; }
-.qr-box, .scan-box { text-align: center; margin-top: 12px; }
-.qr-box img { width: 280px; height: 280px; }
-.scan-box video { width: 100%; max-width: 320px; border-radius: 12px; }
+section h3 .sub { font-size: 12px; font-weight: 500; color: var(--text-3); }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.row input {
+  flex: 1; min-width: 120px; padding: 11px 14px;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--surface-2); color: var(--text); font-size: 14px; outline: none;
+}
+.row input:focus { box-shadow: 0 0 0 2px var(--accent-soft); }
+button, .file-btn {
+  padding: 11px 18px; border: none; border-radius: var(--r-sm);
+  font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.primary {
+  background: var(--accent-grad); color: #fff;
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
+}
+.ghost {
+  flex: 1; background: var(--accent-soft); color: var(--accent);
+}
+.primary:active, .ghost:active { transform: scale(0.97); }
+.hint { color: var(--text-3); font-size: 12.5px; line-height: 1.5; margin-bottom: 12px; }
+
+.budget { margin-top: 14px; }
+.bar { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.fill {
+  display: block; height: 100%; border-radius: 999px;
+  background: var(--accent-grad); transition: width 0.4s ease;
+}
+.fill.over { background: linear-gradient(135deg, #f43f5e, #fb7185); }
+.budget p { font-size: 13px; color: var(--text-2); margin-top: 8px; font-variant-numeric: tabular-nums; }
+.budget p.over { color: var(--expense); font-weight: 600; }
+
+.qr-box, .scan-box { text-align: center; margin-top: 16px; }
+.qr-box img { width: 240px; height: 240px; border-radius: var(--r-sm); }
+.qr-box p, .scan-box p { font-size: 13px; color: var(--text-2); margin: 10px 0; }
+.qr-box .ghost, .scan-box .ghost { flex: none; padding: 9px 20px; }
+.scan-box video { width: 100%; max-width: 300px; border-radius: var(--r); }
 </style>
