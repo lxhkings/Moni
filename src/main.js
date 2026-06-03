@@ -1,4 +1,8 @@
 import { createApp } from 'vue'
 import App from './App.vue'
+import { router } from './router.js'
+import { seedDefaults } from './db/schema.js'
 
-createApp(App).mount('#app')
+seedDefaults().then(() => {
+  createApp(App).use(router).mount('#app')
+})

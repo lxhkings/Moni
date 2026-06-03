@@ -1,0 +1,1 @@
+<template><div class="page"><h2>记一笔</h2></div></template>

@@ -1,0 +1,1 @@
+<template><div class="page"><h2>报表</h2></div></template>
