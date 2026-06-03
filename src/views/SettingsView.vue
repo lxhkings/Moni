@@ -1,1 +1,217 @@
-<template><div class="page"><h2>我的</h2></div></template>
+<script setup>
+import { ref, onMounted } from 'vue'
+import QRCode from 'qrcode'
+import jsQR from 'jsqr'
+import { db } from '../db/schema.js'
+import { setBudget, getBudget, budgetUsage } from '../db/budgets.js'
+import { exportToString, importFromString } from '../db/migration.js'
+import { splitIntoFrames, reassembleFrames } from '../db/qr.js'
+import { yuanToCents, centsToYuan } from '../money.js'
+
+const month = ref(new Date().toISOString().slice(0, 7))
+const budgetYuan = ref('')
+const usage = ref(null)
+
+async function loadBudget() {
+  const b = await getBudget(month.value, null)
+  budgetYuan.value = b ? centsToYuan(b.amount) : ''
+  usage.value = await budgetUsage(month.value, null)
+}
+onMounted(loadBudget)
+
+async function saveBudget() {
+  if (!budgetYuan.value) return
+  await setBudget(month.value, null, yuanToCents(budgetYuan.value))
+  await loadBudget()
+  alert('预算已保存')
+}
+
+// ---- 文件导出/导入（兜底备份）----
+async function exportFile() {
+  const payload = await exportToString()
+  const blob = new Blob([payload], { type: 'text/plain' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `moni-backup-${Date.now()}.txt`
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+async function importFile(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  const text = await file.text()
+  if (!confirm('覆盖导入将清空当前数据，继续？')) return
+  try {
+    await importFromString(text, 'overwrite')
+    alert('导入成功，请重启应用')
+  } catch (err) {
+    alert('导入失败：' + err.message)
+  }
+}
+
+// ---- 二维码导出 ----
+const qrFrames = ref([])
+const qrIndex = ref(0)
+const qrImg = ref('')
+let qrTimer = null
+const CHUNK = 800 // 单帧 payload 字符上限，留余量保证可扫
+
+async function startQrExport() {
+  const payload = await exportToString()
+  qrFrames.value = splitIntoFrames(payload, CHUNK)
+  qrIndex.value = 0
+  await renderFrame()
+  if (qrTimer) clearInterval(qrTimer)
+  if (qrFrames.value.length > 1) {
+    qrTimer = setInterval(() => {
+      qrIndex.value = (qrIndex.value + 1) % qrFrames.value.length
+      renderFrame()
+    }, 1500) // 每 1.5s 轮播下一帧
+  }
+}
+async function renderFrame() {
+  qrImg.value = await QRCode.toDataURL(qrFrames.value[qrIndex.value], { width: 280 })
+}
+function stopQrExport() {
+  if (qrTimer) clearInterval(qrTimer)
+  qrFrames.value = []
+  qrImg.value = ''
+}
+
+// ---- 扫码导入 ----
+const scanning = ref(false)
+const collected = ref([]) // 已扫帧文本
+const scanStatus = ref('')
+const videoEl = ref(null)
+let stream = null
+let rafId = null
+
+async function startScan() {
+  scanning.value = true
+  collected.value = []
+  scanStatus.value = '对准旧手机二维码…'
+  stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+  videoEl.value.srcObject = stream
+  await videoEl.value.play()
+  tick()
+}
+function tick() {
+  const video = videoEl.value
+  if (!scanning.value || !video) return
+  if (video.readyState === video.HAVE_ENOUGH_DATA) {
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    const code = jsQR(img.data, img.width, img.height)
+    if (code && code.data.startsWith('MONI/')) {
+      if (!collected.value.includes(code.data)) collected.value.push(code.data)
+      const payload = reassembleFrames(collected.value)
+      scanStatus.value = `已扫 ${collected.value.length} 帧…`
+      if (payload) {
+        finishScan(payload)
+        return
+      }
+    }
+  }
+  rafId = requestAnimationFrame(tick)
+}
+async function finishScan(payload) {
+  stopScan()
+  if (!confirm('覆盖导入将清空本机数据，继续？')) return
+  try {
+    await importFromString(payload, 'overwrite')
+    alert('迁移成功，请重启应用')
+  } catch (err) {
+    alert('导入失败：' + err.message)
+  }
+}
+function stopScan() {
+  scanning.value = false
+  if (rafId) cancelAnimationFrame(rafId)
+  if (stream) stream.getTracks().forEach((t) => t.stop())
+}
+
+// ---- 货币符号 ----
+const currency = ref('¥')
+onMounted(async () => {
+  const m = await db.meta.get('currencySymbol')
+  if (m) currency.value = m.value
+})
+async function saveCurrency() {
+  await db.meta.put({ key: 'currencySymbol', value: currency.value })
+  alert('已保存')
+}
+</script>
+
+<template>
+  <div class="page settings">
+    <section>
+      <h3>本月预算（{{ month }}）</h3>
+      <div class="row">
+        <input v-model="budgetYuan" type="number" placeholder="预算金额(元)" />
+        <button @click="saveBudget">保存</button>
+      </div>
+      <p v-if="usage && usage.budget != null" :class="{ over: usage.overBudget }">
+        已花 {{ centsToYuan(usage.spent) }} / {{ centsToYuan(usage.budget) }}
+        <span v-if="usage.overBudget">⚠️ 已超支</span>
+        <span v-else>，剩 {{ centsToYuan(usage.remaining) }}</span>
+      </p>
+    </section>
+
+    <section>
+      <h3>货币符号</h3>
+      <div class="row">
+        <input v-model="currency" maxlength="3" />
+        <button @click="saveCurrency">保存</button>
+      </div>
+    </section>
+
+    <section>
+      <h3>换机迁移（二维码）</h3>
+      <p class="hint">旧机点"显示二维码"，新机点"扫码导入"，多帧请持续对准轮播。</p>
+      <div class="row">
+        <button @click="startQrExport">显示二维码</button>
+        <button @click="startScan">扫码导入</button>
+      </div>
+      <div v-if="qrImg" class="qr-box">
+        <img :src="qrImg" />
+        <p>第 {{ qrIndex + 1 }} / {{ qrFrames.length }} 帧</p>
+        <button @click="stopQrExport">关闭</button>
+      </div>
+      <div v-if="scanning" class="scan-box">
+        <video ref="videoEl" playsinline></video>
+        <p>{{ scanStatus }}</p>
+        <button @click="stopScan">取消</button>
+      </div>
+    </section>
+
+    <section>
+      <h3>文件备份（兜底）</h3>
+      <div class="row">
+        <button @click="exportFile">导出备份文件</button>
+        <label class="file-btn">
+          导入备份文件
+          <input type="file" accept=".txt" @change="importFile" hidden />
+        </label>
+      </div>
+    </section>
+  </div>
+</template>
+
+<style scoped>
+section { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+section h3 { font-size: 15px; margin-bottom: 10px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row input { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 8px; }
+.row button, .file-btn {
+  padding: 8px 14px; border: none; background: #007aff; color: #fff; border-radius: 8px; cursor: pointer;
+}
+.hint { color: #999; font-size: 12px; margin-bottom: 8px; }
+.over { color: #ff3b30; }
+.qr-box, .scan-box { text-align: center; margin-top: 12px; }
+.qr-box img { width: 280px; height: 280px; }
+.scan-box video { width: 100%; max-width: 320px; border-radius: 12px; }
+</style>
